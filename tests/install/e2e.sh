@@ -99,6 +99,15 @@ check "install dir removed"                     test ! -e "$NS_DIR"
 check "containers removed"                      bash -c '[ -z "$(docker ps -aq --filter name=ns-ci </dev/null)" ]'
 check "data volume removed"                     bash -c '[ -z "$(docker volume ls -q --filter name=ns-ci </dev/null)" ]'
 
+echo "## 新装后直接卸载（从没更新过，没有 .prev 文件）"
+NS_REPO_RAW="file://$WORK/new" run_install > "$WORK/install2.out"; rc=$?
+[ "$rc" = 0 ] && ok "second fresh install exit 0" || { bad "second fresh install exit $rc"; tail -8 "$WORK/install2.out"; }
+check "no previous compose file yet"            test ! -e "$NS_DIR/docker-compose.yml.prev"
+printf '%s\n卸载\n' "$NS_DIR" | script -qec "bash $ROOT/install.sh --uninstall" /dev/null >/dev/null 2>&1
+check "uninstall works without a previous version (dir removed)"  test ! -e "$NS_DIR"
+check "uninstall works without a previous version (containers removed)" bash -c '[ -z "$(docker ps -aq --filter name=ns-ci </dev/null)" ]'
+check "uninstall works without a previous version (volume removed)"     bash -c '[ -z "$(docker volume ls -q --filter name=ns-ci </dev/null)" ]'
+
 docker image rm "$OLD_IMG" >/dev/null 2>&1 </dev/null || true
 [ "$FAILED" = 0 ] && echo "ALL PASSED" || echo "SOME TESTS FAILED"
 exit "$FAILED"

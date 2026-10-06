@@ -80,7 +80,10 @@ dc() { (cd "$DIR" && docker compose "$@" </dev/null); }
 get_conf() { sed -n "s/^$1=//p" "$DIR/.install" 2>/dev/null | head -n 1; }
 
 # 读取 compose 文件里的镜像名
-image_of() { sed -n 's/^[[:space:]]*image:[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$1" 2>/dev/null | head -n 1; }
+image_of() {
+  [ -f "$1" ] || return 0   # 文件不存在（比如从没更新过，就没有 .prev）就返回空，不算出错
+  sed -n '/^[[:space:]]*image:/{s/^[[:space:]]*image:[[:space:]]*\([^[:space:]#]*\).*/\1/;p;q;}' "$1"
+}
 
 valid_domain() { [[ "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]; }
 
