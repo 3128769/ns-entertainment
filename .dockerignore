@@ -1,0 +1,10 @@
+.git
+data
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/._*
+backend/dev
+*.md

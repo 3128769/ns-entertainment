@@ -1,0 +1,80 @@
+/*
+ * Design tokens. The values are the ones the previous interface used (zinc neutrals, hairline
+ * borders, black primary), so the look is unchanged while the layout and code are new.
+ */
+:root {
+  color-scheme: light;
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --panel2: #f4f4f5;
+  --line: #ececee;
+  --strong: #d4d4d8;
+  --text: #18181b;
+  --sub: #71717a;
+  --muted: #a1a1aa;
+  --black: #18181b;
+  --on-black: #f7f7f8;
+  --accent-soft: #f4f4f5;
+  --icon: #525252;
+  --red: #f43f5e;
+  --violet: #8b5cf6;
+  --r: 12px;
+  --r-lg: 14px;
+  --shadow: none;
+  --ring: rgb(17 24 39 / 0.05);
+  --logo-bg: #18181b;
+  --logo-fg: #ffffff;
+  --scrim: rgb(17 24 39 / 0.44);
+  --scrim-nav: rgb(0 0 0 / 0.4);
+  --top-bg: rgb(247 247 248 / 0.86);
+  --modal-shadow: 0 24px 80px rgb(0 0 0 / 0.14);
+
+  /* badges (status pills) */
+  --badge-ok: #047857; --badge-ok-bg: rgb(16 185 129 / 0.08); --badge-ok-line: rgb(16 185 129 / 0.25);
+  --badge-bad: #be123c; --badge-bad-bg: #fff1f2; --badge-bad-line: #fecdd3;
+  --badge-info: #404040; --badge-info-bg: #f4f4f5; --badge-info-line: #e5e5e5;
+  --badge-muted: #71717a; --badge-muted-bg: #f9fafb; --badge-muted-line: #e5e7eb;
+
+  /* chips (coloured feature tags) */
+  --chip-warn: #c2410c; --chip-warn-bg: #fff7ed; --chip-warn-line: #ffedd5;
+  --chip-blue: #075985; --chip-blue-bg: #f0f9ff; --chip-blue-line: #e0f2fe;
+  --chip-ok: #047857; --chip-ok-bg: #ecfdf5; --chip-ok-line: #d1fae5;
+  --chip-violet: #6d28d9; --chip-violet-bg: #f5f3ff; --chip-violet-line: #ede9fe;
+
+  --font: ui-sans-serif, -apple-system, 'system-ui', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0c0c0e;
+  --panel: #141416;
+  --panel2: #1c1c1f;
+  --line: #2a2a2e;
+  --strong: #3f3f46;
+  --text: #fafafa;
+  --sub: #a1a1aa;
+  --muted: #71717a;
+  --black: #fafafa;
+  --on-black: #18181b;
+  --accent-soft: #27272a;
+  --icon: #a1a1aa;
+  --red: #fb7185;
+  --violet: #c4b5fd;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --ring: rgb(250 250 250 / 0.08);
+  --logo-bg: #f3f4f6;
+  --logo-fg: #111111;
+  --top-bg: rgb(12 12 14 / 0.8);
+  --modal-shadow: 0 24px 80px rgb(0 0 0 / 0.5);
+
+  --badge-ok: #6ee7b7; --badge-ok-bg: rgb(16 185 129 / 0.12); --badge-ok-line: rgb(16 185 129 / 0.3);
+  --badge-bad: #fda4af; --badge-bad-bg: rgb(244 63 94 / 0.12); --badge-bad-line: rgb(244 63 94 / 0.3);
+  --badge-info: #d4d4d4; --badge-info-bg: #262626; --badge-info-line: #404040;
+  --badge-muted: #a3a3a3; --badge-muted-bg: rgb(107 114 128 / 0.15); --badge-muted-line: rgb(107 114 128 / 0.3);
+
+  --chip-warn: #fdba74; --chip-warn-bg: rgb(67 20 7 / 0.4); --chip-warn-line: rgb(154 52 18 / 0.5);
+  --chip-blue: #7dd3fc; --chip-blue-bg: rgb(12 74 110 / 0.25); --chip-blue-line: rgb(14 116 144 / 0.35);
+  --chip-ok: #6ee7b7; --chip-ok-bg: rgb(16 185 129 / 0.12); --chip-ok-line: rgb(16 185 129 / 0.3);
+  --chip-violet: #c4b5fd; --chip-violet-bg: rgb(76 29 149 / 0.25); --chip-violet-line: rgb(109 40 217 / 0.35);
+}

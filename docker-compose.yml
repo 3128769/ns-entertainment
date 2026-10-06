@@ -1,0 +1,53 @@
+# One image, two roles. `web` serves the API and the UI; `worker` is the only scheduler.
+x-common: &common
+  build: .
+  image: ns-entertainment:3.0.2
+  volumes:
+    - ./data:/data
+  environment: &env
+    NS_DATA_DIR: /data
+    NS_ADMIN_USER: admin
+    NS_JOB_CONCURRENCY: "4"
+    TZ: Asia/Shanghai
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }   # keep container logs bounded
+  init: true
+  mem_limit: 1g
+  cpus: 1.0
+
+services:
+  web:
+    <<: *common
+    container_name: ns-entertainment
+    command: ["uvicorn", "nsapp.api.app:app", "--host", "0.0.0.0", "--port", "8090"]
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      <<: *env
+      NS_SCHEDULER_ENABLED: "0"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  worker:
+    <<: *common
+    container_name: ns-entertainment-worker
+    command: ["python", "-m", "nsapp.worker.main"]
+    environment:
+      <<: *env
+      NS_SCHEDULER_ENABLED: "1"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from nsapp.repositories.jobs import state; raise SystemExit(0 if state()['ready'] else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
