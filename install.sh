@@ -112,8 +112,8 @@ check_basics() {
   [ "$(id -u)" = 0 ] || die "请用 root 运行：先执行 sudo -i 切换成 root，再运行本脚本。"
   command -v apt-get >/dev/null 2>&1 || die "本脚本只支持 Debian / Ubuntu。其他系统请看 README 里的「手动部署」。"
   case "$(uname -m)" in x86_64|aarch64) ;; *) die "不支持的 CPU 架构：$(uname -m)（需要 x86_64 或 ARM64）。" ;; esac
-  [[ "$PORT" =~ ^[0-9]+$ ]] && [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "NS_PORT 不是有效的端口：$PORT"
-  [[ "$DIR" == /* ]] && [ "$DIR" != / ] || die "NS_DIR 必须是绝对路径，且不能是 /：$DIR"
+  if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then die "NS_PORT 不是有效的端口：$PORT"; fi
+  if [[ "$DIR" != /* ]] || [ "$DIR" = / ]; then die "NS_DIR 必须是绝对路径，且不能是 /：$DIR"; fi
 }
 
 require_installed() { [ -f "$DIR/.install" ] || die "没有找到安装（$DIR）。请先运行：bash install.sh"; }
