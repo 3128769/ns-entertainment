@@ -1,12 +1,12 @@
 name: release
 
-# Publishes the ready-to-run image to GitHub Container Registry when a version tag (v3.0.3, ...) is pushed.
+# Publishes the ready-to-run image to GitHub Container Registry when a version tag (v3.0.4, ...) and creates the GitHub Release from docs/releases/<tag>.md is pushed.
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: read
+  contents: write   # to create the GitHub Release
   packages: write
 
 jobs:
@@ -39,3 +39,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "docs/releases/$GITHUB_REF_NAME.md"

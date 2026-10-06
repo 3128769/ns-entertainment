@@ -48,6 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: shellcheck install.sh
+      - run: shellcheck -S warning tests/install/*.sh
       - name: README compose block matches docker-compose.template.yml
         run: |
           python3 - <<'PY'
@@ -57,3 +58,21 @@ jobs:
           block = re.search(r"```yaml\n(.*?)\n```", readme, re.S)
           sys.exit(0 if block and block.group(1) == template else "README.md 里的 compose 内容和 docker-compose.template.yml 不一致")
           PY
+
+  install-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image that docker-compose.template.yml points to
+        run: |
+          IMG="$(sed -n 's/^[[:space:]]*image:[[:space:]]*\([^[:space:]#]*\).*/\1/p' docker-compose.template.yml | head -n 1)"
+          docker build --target runtime -t "$IMG" .
+      - name: install.sh end to end (install, backup, update, failed update rolls back, rollback, uninstall)
+        run: sudo -E bash tests/install/e2e.sh
+
+  install-nginx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install.sh nginx / HTTPS flow (throwaway Debian container)
+        run: docker run --rm -v "$PWD:/src:ro" python:3.12-slim bash /src/tests/install/nginx.sh

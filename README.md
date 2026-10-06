@@ -38,14 +38,14 @@ docs/       架构、部署与回滚、前端、发布说明
 | --- | --- |
 | 一台 Linux 服务器 | 全新的 Debian / Ubuntu（x86_64 或 ARM64），用 root 运行；512MB 以上空闲内存。Docker、nginx 等由安装脚本自动安装 |
 | 出网访问 | `github.com`、`ghcr.io`（下载程序）、`www.nodeseek.com`、`rss.nodeseek.com`、`api.telegram.org`。被 Cloudflare 拦截或直连不通时，可在界面里给账号配置 socks5/http 代理 |
-| 防火墙 | 云服务器的防火墙/安全组放行 **80** 端口（绑定域名用 HTTPS 时再放行 443） |
-| 域名（可选） | **不绑定域名**：直接用 `http://服务器IP` 访问（不加密）。**绑定域名**：自动申请免费的 HTTPS 证书，推荐 |
+| 防火墙 | 云服务器的防火墙/安全组放行 **80** 和 **443** 端口 |
+| 域名（可选） | **不绑定域名**：用 `https://服务器IP` 访问（自签名证书，浏览器会提示“不受信任”，点继续即可）。**绑定域名**：自动申请免费的正规证书，没有警告，推荐 |
 | NodeSeek 账号 Cookie | 见下方“获取 Cookie” |
 | Telegram Bot | 见下方“获取 Bot Token 和 Chat ID”（只用签到可不配） |
 
 ## 安装
 
-全新的 Debian / Ubuntu 服务器（x86_64 或 ARM64），用 root 运行。安装过程只会问两件事：**域名**（可选，不绑定直接回车，用 `http://服务器IP` 访问；填了域名会自动配置 HTTPS）和**管理员密码**（回车自动生成）。装好后按屏幕提示登录，用户名是 `admin`。
+全新的 Debian / Ubuntu 服务器（x86_64 或 ARM64），用 root 运行。安装过程只会问两件事：**域名**（可选：不绑定直接回车，用 `https://服务器IP` 访问，自签名证书，浏览器会提示“不受信任”，点继续即可；填了域名会自动申请正规的 HTTPS 证书）和**管理员密码**（回车自动生成）。装好后按屏幕提示登录，用户名是 `admin`。
 
 ```bash
 apt-get update && apt-get install -y curl ca-certificates
@@ -55,7 +55,7 @@ bash install.sh
 
 ## 更新
 
-更新前会自动备份数据，然后下载最新版本并重启，数据和密码都不会丢。
+更新前会自动备份数据（同时复制一份到安装目录的 `backups/`），然后下载最新版本并重启，数据和密码都不会丢。**更新失败会自动回滚到旧版本。**
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/3128769/ns-entertainment/main/install.sh
@@ -74,8 +74,10 @@ bash install.sh --uninstall
 ## 其他命令
 
 ```bash
+bash install.sh --backup                # 手动备份数据（保存在安装目录的 backups/，请再复制一份到服务器之外）
+bash install.sh --rollback              # 回滚到更新前的版本（数据不动；再执行一次回到新版本）
 bash install.sh --set-password          # 重新设置管理员密码（忘记密码时用）
-bash install.sh --set-domain 你的域名    # 以后再绑定域名，自动配置 HTTPS
+bash install.sh --set-domain 你的域名    # 以后再绑定域名，自动申请正规证书
 ```
 
 没有域名但想要 HTTPS：可以用免费的 `sslip.io`，把服务器 IP 的点换成短横线，前面加 `ns.`，后面加 `.sslip.io`，例如 IP 是 `203.0.113.10`，域名就是 `ns.203-0-113-10.sslip.io`。
@@ -99,11 +101,11 @@ bash install.sh --set-domain 你的域名    # 以后再绑定域名，自动配
 #
 # 管理员用户名是 admin。程序只监听服务器本机的 127.0.0.1:8090，不对公网开放：
 # 用 nginx 做 HTTPS 反向代理（模板见 deploy/nginx.conf），或者用 SSH 隧道访问。
-# 更新：docker compose pull && docker compose up -d
+# 更新：把下面 image 的版本号改成新版本，再执行 docker compose pull && docker compose up -d
 # 数据（数据库和加密密钥）保存在 Docker 卷 ns-data 里，备份时必须一起保存。
 
 x-ns: &ns
-  image: ghcr.io/3128769/ns-entertainment:latest   # 想固定版本就改成具体版本号，例如 :3.0.3
+  image: ghcr.io/3128769/ns-entertainment:3.0.4   # 固定版本号；更新时改成新版本号（见 GitHub 的 Releases 页面）
   restart: unless-stopped
   volumes:
     - ns-data:/data
@@ -188,7 +190,7 @@ docker compose up -d
 curl http://127.0.0.1:8090/readyz        # 返回 {"status":"ok","ready":true} 即就绪
 ```
 
-程序只监听 `127.0.0.1:8090`，需要自己用 nginx 做反向代理（`deploy/nginx.conf` 是模板；登录限速依赖 nginx 写入的 `X-Real-IP`，不要把 8090 直接暴露到公网）。更新：`docker compose pull && docker compose up -d`。
+程序只监听 `127.0.0.1:8090`，需要自己用 nginx 做反向代理（`deploy/nginx.conf` 是模板；登录限速依赖 nginx 写入的 `X-Real-IP`，不要把 8090 直接暴露到公网）。更新：把 `image` 的版本号改成新版本（见 [Releases](https://github.com/3128769/ns-entertainment/releases)），再执行 `docker compose pull && docker compose up -d`。
 
 修改管理员密码：
 

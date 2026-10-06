@@ -3,7 +3,7 @@ x-common: &common
   build:
     context: .
     target: runtime
-  image: ghcr.io/3128769/ns-entertainment:3.0.3
+  image: ghcr.io/3128769/ns-entertainment:3.0.4
   volumes:
     - ./data:/data
   environment: &env

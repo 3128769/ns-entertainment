@@ -9,11 +9,11 @@
 #
 # 管理员用户名是 admin。程序只监听服务器本机的 127.0.0.1:8090，不对公网开放：
 # 用 nginx 做 HTTPS 反向代理（模板见 deploy/nginx.conf），或者用 SSH 隧道访问。
-# 更新：docker compose pull && docker compose up -d
+# 更新：把下面 image 的版本号改成新版本，再执行 docker compose pull && docker compose up -d
 # 数据（数据库和加密密钥）保存在 Docker 卷 ns-data 里，备份时必须一起保存。
 
 x-ns: &ns
-  image: ghcr.io/3128769/ns-entertainment:latest   # 想固定版本就改成具体版本号，例如 :3.0.3
+  image: ghcr.io/3128769/ns-entertainment:3.0.4   # 固定版本号；更新时改成新版本号（见 GitHub 的 Releases 页面）
   restart: unless-stopped
   volumes:
     - ns-data:/data

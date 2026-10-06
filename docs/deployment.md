@@ -20,8 +20,8 @@ curl --fail http://127.0.0.1:8090/readyz
 
 1. **构建并测试候选镜像**（不影响线上）：
    ```bash
-   docker build --target runtime -t ns-entertainment:3.0.3 .
-   docker build --target test -t ns-entertainment:3.0.3-test . && docker run --rm --network none ns-entertainment:3.0.3-test
+   docker build --target runtime -t ns-entertainment:3.0.4 .
+   docker build --target test -t ns-entertainment:3.0.4-test . && docker run --rm --network none ns-entertainment:3.0.4-test
    ```
 2. **用生产数据的副本演练**：用 SQLite 在线备份复制 `app.sqlite` 和 `.secret_key` 到临时目录，`NS_SCHEDULER_ENABLED=0`，只读检查接口返回与数据库一致。
 3. **停写、备份**：
@@ -49,7 +49,13 @@ docker compose up -d --no-build
 
 `scripts/backup.py <目录>` 用 SQLite 在线备份 API 生成一致性副本，并复制 `.secret_key` 与 `.admin_password`（权限 600）。**数据库和密钥必须一起保存**，没有密钥无法解密 Cookie 和 Token。`scripts/restore.py <备份目录>` 先校验完整性，再把被替换的文件挪到 `backups/restore-displaced-*`。
 
-用 `install.sh` 或 `docker-compose.template.yml` 安装时，数据在 Docker 卷 `ns-data` 里（不是 `./data` 目录）。脚本安装的程序在 `/opt/ns-entertainment`，下面的命令都在这个目录里执行；`install.sh --update` 会在更新前自动备份到卷里的 `/data/backups/update-*`（只保留最近 5 份）。手动备份：
+用 `install.sh` 或 `docker-compose.template.yml` 安装时，数据在 Docker 卷 `ns-data` 里（不是 `./data` 目录）。脚本安装的程序在 `/opt/ns-entertainment`，下面的命令都在这个目录里执行：
+
+- `bash install.sh --backup`：手动备份。备份先在卷里做一致性副本，再复制到 `/opt/ns-entertainment/backups/manual-*`（数据库和加密密钥，请再复制一份到服务器之外）。
+- `bash install.sh --update`：更新前自动备份到 `backups/update-*`（只保留最近 5 份），然后重新获取最新的 `docker-compose.yml`、下载新镜像并重启；**更新失败会自动回滚到旧版本**。更新时 `docker-compose.yml` 会被替换，旧的保存为 `docker-compose.yml.prev`，所以脚本安装的配置请不要手动改，自定义的设置放在 `.env` 里。
+- `bash install.sh --rollback`：把程序切回更新前的版本（只切代码，不恢复备份的数据；再执行一次回到新版本）。需要恢复数据时才用 `scripts/restore.py`，注意上面说的风险。
+
+手动用 `docker-compose.template.yml` 部署的，备份命令是：
 
 ```bash
 docker compose stop worker web
@@ -57,6 +63,13 @@ docker compose run --rm --no-deps --entrypoint python web scripts/backup.py /dat
 docker compose cp web:/data/backups ./backups   # 复制到当前目录，再保存到服务器之外
 docker compose up -d
 ```
+
+## 发布新版本（维护者）
+
+1. 统一版本号：`backend/nsapp/__init__.py`、`frontend/package.json`、`frontend/src/views/LoginView.vue`、`frontend/src/layouts/AppShell.vue` 里的兜底值、`docker-compose.yml` 和 `docker-compose.template.yml` 里的镜像版本号（README 里的 compose 内容要和模板文件完全一致，CI 会检查）；新增 `docs/releases/vX.Y.Z.md`。
+2. 推送 `main`，等 `ci` 的所有任务（backend、frontend、image、script、install-e2e、install-nginx）通过。
+3. 打标签并推送：`git tag -a vX.Y.Z -m X.Y.Z && git push origin vX.Y.Z`。GitHub Actions 会构建 amd64 / arm64 镜像、发布到 `ghcr.io`，并用 `docs/releases/vX.Y.Z.md` 创建 GitHub Release。
+4. 模板里固定的镜像版本在第 3 步完成之前还不存在，所以第 2 步到第 3 步之间不要让别人安装。
 
 ## 故障排查
 

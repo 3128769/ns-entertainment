@@ -68,7 +68,7 @@ const worker = computed(() => (!store.worker ? null : store.worker.ready ? 'ok' 
       <div v-if="worker" class="worker" :class="worker" :title="store.worker ? `并发 ${store.worker.concurrency ?? '-'} · 版本 ${store.worker.version}` : ''">
         <i /> {{ worker === 'ok' ? '后台服务运行中' : '后台服务未运行' }}
       </div>
-      <div class="side-foot"><span>NodeSeek 娱乐中心</span><span class="version">v{{ store.worker?.version ?? '3.0.3' }}</span></div>
+      <div class="side-foot"><span>NodeSeek 娱乐中心</span><span class="version">v{{ store.worker?.version ?? '3.0.4' }}</span></div>
     </aside>
     <div class="scrim" :class="{ show: menuOpen }" @click="menuOpen = false" />
 

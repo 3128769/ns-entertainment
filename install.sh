@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# NodeSeek 娱乐中心 · 安装 / 更新 / 卸载
+# NodeSeek 娱乐中心 · 安装 / 更新 / 备份 / 回滚 / 卸载
 #
 #   bash install.sh                       安装（只会问：域名（可选）、管理员密码）
-#   bash install.sh --update              更新到最新版（先自动备份数据）
+#   bash install.sh --update              更新到最新版（先自动备份；更新失败会自动回滚）
+#   bash install.sh --rollback            回滚到更新前的版本（数据不动）
+#   bash install.sh --backup              手动备份数据
 #   bash install.sh --set-password        重新设置管理员密码
 #   bash install.sh --set-domain 域名     以后再绑定域名，并自动配置 HTTPS
 #   bash install.sh --uninstall           卸载（删除程序、配置和全部数据）
 #
 # 适用：全新的 Debian / Ubuntu 服务器（x86_64 或 ARM64），用 root 运行。
-# 不绑定域名时，直接用 http://服务器IP 访问（不加密）；绑定域名会自动申请免费的 HTTPS 证书。
+# 访问方式：绑定域名 = 自动申请免费的 Let's Encrypt 证书；不绑定域名 = https://服务器IP（自签名证书，
+# 浏览器会提示“不受信任”，点继续即可）。80 端口一律跳转到 HTTPS，密码和 Cookie 不会走明文。
 # 可选的环境变量（想免交互，或有特殊需求时用）：
 #   NS_DOMAIN=ns.example.com   域名（可选）。不设置则交互输入，直接回车 = 不绑定域名，用 IP 访问
 #   NS_ADMIN_PASSWORD=...      管理员密码（至少 8 位）。不设置则交互输入，回车自动生成
 #   NS_EMAIL=me@example.com    申请 HTTPS 证书用的邮箱（可选，用于到期提醒）
 #   NS_SKIP_NGINX=1            不装 nginx 和证书，程序只监听 127.0.0.1:端口（已有自己的反向代理时用）
+#   NS_SKIP_PULL=1             不从镜像仓库下载，使用本机已有的镜像（离线安装、测试用）
 #   NS_PORT=8090               程序在本机监听的端口
 #   NS_DIR=/opt/ns-entertainment   安装目录
 set -Eeuo pipefail
@@ -22,13 +26,16 @@ REPO_RAW="${NS_REPO_RAW:-https://raw.githubusercontent.com/3128769/ns-entertainm
 DIR="${NS_DIR:-/opt/ns-entertainment}"
 PORT="${NS_PORT:-8090}"
 SKIP_NGINX="${NS_SKIP_NGINX:-0}"
+SKIP_PULL="${NS_SKIP_PULL:-0}"
 NGINX_CONF="/etc/nginx/conf.d/ns-entertainment.conf"
-IMAGE="ghcr.io/3128769/ns-entertainment:latest"
+TLS_CRT="/etc/ssl/certs/ns-entertainment.crt"
+TLS_KEY="/etc/ssl/private/ns-entertainment.key"
 
 DOMAIN=""
 PASSWORD=""
 GENERATED=0
-HTTPS=0
+HTTPS=0       # 1 = 域名 + Let's Encrypt 证书
+SELFSIGNED=0  # 1 = 自签名证书（用 IP 访问，或域名证书申请失败后的降级）
 
 if [ -t 1 ]; then C_OK=$'\033[1;32m'; C_WARN=$'\033[1;33m'; C_ERR=$'\033[1;31m'; C_OFF=$'\033[0m'; else C_OK=""; C_WARN=""; C_ERR=""; C_OFF=""; fi
 say()  { printf '%s==>%s %s\n' "$C_OK" "$C_OFF" "$*"; }
@@ -40,9 +47,11 @@ usage() {
   cat <<'EOF'
 用法：bash install.sh [选项]
   （无选项）            安装
-  --update              更新到最新版（先自动备份数据）
+  --update              更新到最新版（先自动备份；更新失败会自动回滚）
+  --rollback            回滚到更新前的版本（数据不动；再执行一次回到新版本）
+  --backup              手动备份数据（保存在安装目录的 backups/ 里）
   --set-password        重新设置管理员密码
-  --set-domain 域名     绑定域名并自动配置 HTTPS（安装时没填域名，以后想加密就用这个）
+  --set-domain 域名     绑定域名并自动配置 HTTPS（安装时没填域名，以后想要正规证书就用这个）
   --uninstall           卸载（删除程序、配置和全部数据，需要输入确认）
   -h, --help            显示本说明
 EOF
@@ -70,6 +79,9 @@ dc() { (cd "$DIR" && docker compose "$@" </dev/null); }
 
 get_conf() { sed -n "s/^$1=//p" "$DIR/.install" 2>/dev/null | head -n 1; }
 
+# 读取 compose 文件里的镜像名
+image_of() { sed -n 's/^[[:space:]]*image:[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$1" 2>/dev/null | head -n 1; }
+
 valid_domain() { [[ "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]; }
 
 public_ip() {
@@ -83,13 +95,16 @@ public_ip() {
 
 gen_password() { { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20; } || true; }
 
-# render_nginx 域名 端口 —— 域名为空时作为默认站点，用 IP 访问
+# render_nginx 模式 名称 端口
+#   模式 plain      ：80 端口直接转发（只用于申请证书的那一小段时间）
+#   模式 selfsigned ：80 跳转到 443，443 用自签名证书；名称为空 = 默认站点（用 IP 访问）
 render_nginx() {
-  local listen="80" name="$1"
-  if [ -z "$1" ]; then listen="80 default_server"; name="_"; fi
-  sed -e "s/__LISTEN__/$listen/g" -e "s/__NAME__/$name/g" -e "s/__PORT__/$2/g" <<'EOF'
+  local mode="$1" name="$2" port="$3" default=""
+  if [ -z "$name" ]; then default=" default_server"; name="_"; fi
+  if [ "$mode" = plain ]; then
+    sed -e "s|__NAME__|$name|g" -e "s|__PORT__|$port|g" <<'EOF'
 server {
-    listen __LISTEN__;
+    listen 80;
     server_name __NAME__;
     client_max_body_size 25m;
 
@@ -104,6 +119,35 @@ server {
     }
 }
 EOF
+  else
+    sed -e "s|__DEFAULT__|$default|g" -e "s|__NAME__|$name|g" -e "s|__PORT__|$port|g" \
+        -e "s|__CRT__|$TLS_CRT|g" -e "s|__KEY__|$TLS_KEY|g" <<'EOF'
+server {
+    listen 80__DEFAULT__;
+    server_name __NAME__;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl__DEFAULT__;
+    server_name __NAME__;
+    ssl_certificate __CRT__;
+    ssl_certificate_key __KEY__;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:__PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 180s;
+    }
+}
+EOF
+  fi
 }
 
 # ---------- 检查 ----------
@@ -118,10 +162,10 @@ check_basics() {
 
 require_installed() { [ -f "$DIR/.install" ] || die "没有找到安装（$DIR）。请先运行：bash install.sh"; }
 
-check_port80() {
+check_port() {
   local owner
-  owner="$(ss -ltnpH 'sport = :80' 2>/dev/null | grep -v '"nginx"' || true)"
-  [ -z "$owner" ] || die "80 端口已被其他程序占用：
+  owner="$(ss -ltnpH "sport = :$1" 2>/dev/null | grep -v '"nginx"' || true)"
+  [ -z "$owner" ] || die "$1 端口已被其他程序占用：
 $owner
 请先停掉它；或者设置 NS_SKIP_NGINX=1，用你自己的反向代理。"
 }
@@ -133,7 +177,7 @@ choose_domain() {
   if [ "$SKIP_NGINX" = 1 ]; then DOMAIN=""; return 0; fi
   DOMAIN="${NS_DOMAIN:-}"
   if [ -z "$DOMAIN" ] && have_tty; then
-    printf '域名是可选的：绑定域名可以自动配置 HTTPS 加密；不绑定就直接回车，用服务器 IP 访问（http，不加密）。\n' >&2
+    printf '域名是可选的：绑定域名可以申请正规的 HTTPS 证书；不绑定就直接回车，用 https://服务器IP 访问（自签名证书，浏览器会提示不受信任，点继续即可）。\n' >&2
     ask DOMAIN "域名（可选）: "
   fi
   if [ -z "$DOMAIN" ]; then return 0; fi
@@ -145,7 +189,7 @@ choose_domain() {
   resolved="$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk 'NR==1{print $1}' || true)"
   if [ -n "$ip" ] && [ "$resolved" != "$ip" ]; then
     warn "域名 $DOMAIN 现在解析到「${resolved:-无}」，本机公网 IP 是 $ip。"
-    warn "解析还没生效或没有指向本机时，HTTPS 证书会申请失败。"
+    warn "解析还没生效或没有指向本机时，正规证书会申请失败（会降级为自签名证书）。"
     have_tty || die "请先把域名解析到 $ip，再重新运行。"
     ask ans "仍然继续吗？[y/N] "
     [[ "$ans" =~ ^[Yy]$ ]] || die "已取消。请先把域名解析到 $ip，再重新运行。"
@@ -173,7 +217,7 @@ install_packages() {
   export DEBIAN_FRONTEND=noninteractive
   local missing=()
   dpkg -s curl ca-certificates >/dev/null 2>&1 || missing+=(curl ca-certificates)
-  if [ "$SKIP_NGINX" != 1 ]; then dpkg -s nginx certbot python3-certbot-nginx >/dev/null 2>&1 || missing+=(nginx certbot python3-certbot-nginx); fi
+  if [ "$SKIP_NGINX" != 1 ]; then dpkg -s nginx certbot python3-certbot-nginx openssl >/dev/null 2>&1 || missing+=(nginx certbot python3-certbot-nginx openssl); fi
   if [ "${#missing[@]}" -gt 0 ]; then
     say "安装依赖：${missing[*]}"
     apt-get update -y
@@ -187,13 +231,29 @@ install_packages() {
   docker compose version >/dev/null 2>&1 || die "没有找到 Docker Compose v2。请按官方文档安装 docker-compose-plugin：https://docs.docker.com/compose/install/linux/"
 }
 
+# fetch_template 目标文件 —— 从仓库下载 docker-compose 配置
+fetch_template() {
+  curl -fsSL "$REPO_RAW/docker-compose.template.yml" -o "$1" || return 1
+  grep -q 'ns-data' "$1" || return 1
+}
+
 prepare_dir() {
   mkdir -p "$DIR"
   local tmp; tmp="$(mktemp)"
-  curl -fsSL "$REPO_RAW/docker-compose.template.yml" -o "$tmp" || { rm -f "$tmp"; die "下载配置文件失败：$REPO_RAW/docker-compose.template.yml"; }
-  grep -q 'ns-data' "$tmp" || { rm -f "$tmp"; die "下载到的配置文件内容不对。"; }
+  fetch_template "$tmp" || { rm -f "$tmp"; die "下载配置文件失败：$REPO_RAW/docker-compose.template.yml"; }
   install -m 644 "$tmp" "$DIR/docker-compose.yml"; rm -f "$tmp"
   printf 'NS_PORT=%s\n' "$PORT" > "$DIR/.env"; chmod 600 "$DIR/.env"
+}
+
+pull_images() {
+  if [ "$SKIP_PULL" = 1 ]; then return 0; fi
+  dc pull || return 1
+}
+
+# 启动（或重启）并等到程序就绪；失败返回 1
+wait_ready() {
+  dc up -d --wait --wait-timeout 180 || return 1
+  curl -fsS -m 10 "http://127.0.0.1:$PORT/readyz" >/dev/null || return 1
 }
 
 set_admin_password() {
@@ -202,21 +262,20 @@ set_admin_password() {
 
 start_app() {
   say "下载程序镜像（ghcr.io）…"
-  dc pull
+  pull_images || die "下载镜像失败。检查服务器能否访问 ghcr.io。"
   say "初始化数据库…"
   dc run --rm --no-deps -T migrate >/dev/null
   say "设置管理员密码…"
   set_admin_password
   say "启动程序…"
-  dc up -d --wait --wait-timeout 180
-  curl -fsS -m 10 "http://127.0.0.1:$PORT/readyz" >/dev/null || die "程序没有就绪。看日志：cd $DIR && docker compose logs --tail 50"
+  wait_ready || die "程序没有就绪。看日志：cd $DIR && docker compose logs --tail 50"
 }
 
 open_firewall() {
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
-    say "放行防火墙（ufw）的 80 端口…"
+    say "放行防火墙（ufw）的 80 和 443 端口…"
     ufw allow 80/tcp >/dev/null
-    if [ -n "$DOMAIN" ]; then ufw allow 443/tcp >/dev/null; fi
+    ufw allow 443/tcp >/dev/null
   fi
 }
 
@@ -231,11 +290,21 @@ disable_stock_default_site() {
   rm -f "$f"
 }
 
-setup_nginx() {
-  if [ "$SKIP_NGINX" = 1 ]; then return 0; fi
-  say "配置 nginx…"
-  if [ -z "$DOMAIN" ]; then disable_stock_default_site; fi
-  render_nginx "$DOMAIN" "$PORT" > "$NGINX_CONF"
+# make_selfsigned_cert 名称 —— 名称是 IP 或域名，可以为空
+make_selfsigned_cert() {
+  local name="${1:-}" san=()
+  if [[ "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then san=(-addext "subjectAltName=IP:$name")
+  elif [ -n "$name" ]; then san=(-addext "subjectAltName=DNS:$name"); fi
+  say "生成自签名证书（用于加密访问，浏览器会提示证书不受信任）…"
+  mkdir -p "$(dirname "$TLS_KEY")" "$(dirname "$TLS_CRT")"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -keyout "$TLS_KEY" -out "$TLS_CRT" \
+    -subj "/CN=${name:-ns-entertainment}" ${san[@]+"${san[@]}"} >/dev/null 2>&1
+  chmod 600 "$TLS_KEY"
+}
+
+# apply_nginx 模式 名称 —— 写入配置、检查、重新加载；检查不通过就撤销
+apply_nginx() {
+  render_nginx "$1" "$2" "$PORT" > "$NGINX_CONF"
   if ! nginx -t >/dev/null 2>&1; then
     nginx -t || true
     rm -f "$NGINX_CONF"
@@ -243,19 +312,35 @@ setup_nginx() {
   fi
   systemctl enable --now nginx >/dev/null 2>&1 || true
   systemctl reload nginx
+}
+
+setup_nginx() {
+  if [ "$SKIP_NGINX" = 1 ]; then return 0; fi
+  say "配置 nginx…"
+  HTTPS=0; SELFSIGNED=0
   open_firewall
 
-  HTTPS=0
-  if [ -z "$DOMAIN" ]; then return 0; fi
+  if [ -z "$DOMAIN" ]; then
+    disable_stock_default_site
+    make_selfsigned_cert "$(public_ip || true)"
+    apply_nginx selfsigned ""
+    SELFSIGNED=1
+    return 0
+  fi
+
+  apply_nginx plain "$DOMAIN"
   say "申请 HTTPS 证书（Let's Encrypt，免费，自动续期；视为同意其服务条款）…"
   local args=(--nginx -d "$DOMAIN" --non-interactive --agree-tos --redirect)
   if [ -n "${NS_EMAIL:-}" ]; then args+=(-m "$NS_EMAIL"); else args+=(--register-unsafely-without-email); fi
   if certbot "${args[@]}" </dev/null; then
     HTTPS=1
+    rm -f "$TLS_CRT" "$TLS_KEY"
   else
-    warn "证书申请失败，网站暂时只能用 http 访问（不加密，请先不要输入重要信息）。"
-    warn "多半是域名没有解析到本机，或云服务器的防火墙/安全组没有放行 80 和 443。修好后执行："
-    warn "  bash install.sh --set-domain $DOMAIN"
+    warn "正规证书申请失败：多半是域名没有解析到本机，或云服务器的防火墙/安全组没有放行 80 和 443。"
+    warn "已降级为自签名证书（仍然是加密的，只是浏览器会提示不受信任）。修好后执行：bash install.sh --set-domain $DOMAIN"
+    make_selfsigned_cert "$DOMAIN"
+    apply_nginx selfsigned "$DOMAIN"
+    SELFSIGNED=1
   fi
 }
 
@@ -265,22 +350,25 @@ save_state() {
     printf 'PORT=%s\n' "$PORT"
     printf 'NGINX=%s\n' "$([ "$SKIP_NGINX" = 1 ] && echo 0 || echo 1)"
     printf 'HTTPS=%s\n' "$HTTPS"
+    printf 'SELFSIGNED=%s\n' "$SELFSIGNED"
   } > "$DIR/.install"
 }
 
 show_address() {
   local ip
   if [ "$SKIP_NGINX" = 1 ]; then
-    printf '    程序只监听 http://127.0.0.1:%s ，请自己配置反向代理（强烈建议 HTTPS）。\n' "$PORT"
+    printf '    程序只监听 http://127.0.0.1:%s ，请自己配置反向代理（必须是 HTTPS）。\n' "$PORT"
   elif [ "$HTTPS" = 1 ]; then
     printf '    访问地址：https://%s\n' "$DOMAIN"
   elif [ -n "$DOMAIN" ]; then
-    printf '    访问地址：http://%s （证书申请失败，暂时未加密）\n' "$DOMAIN"
+    printf '    访问地址：https://%s （自签名证书）\n' "$DOMAIN"
+    printf '    浏览器会提示“不安全 / 证书不受信任”，点「高级 → 继续访问」即可；连接本身是加密的。\n'
   else
     ip="$(public_ip || true)"
-    printf '    访问地址：http://%s\n' "${ip:-你的服务器IP}"
-    printf '    注意：现在是 http 明文访问，密码和 Cookie 在网络上不加密。想加密，绑定一个域名即可：\n'
-    printf '          bash install.sh --set-domain 你的域名      （没有域名可以用免费的 ns.IP地址用短横线连接.sslip.io，例如 ns.203-0-113-10.sslip.io）\n'
+    printf '    访问地址：https://%s\n' "${ip:-你的服务器IP}"
+    printf '    这是自签名证书：浏览器会提示“不安全 / 证书不受信任”，点「高级 → 继续访问」一次即可；连接本身是加密的。\n'
+    printf '    想去掉提示：绑定一个域名，执行 bash install.sh --set-domain 你的域名\n'
+    printf '    （没有域名可以用免费的 ns.IP地址用短横线连接.sslip.io，例如 ns.203-0-113-10.sslip.io）\n'
   fi
 }
 
@@ -294,12 +382,30 @@ show_credentials() {
   fi
 }
 
+# ---------- 备份 ----------
+
+# backup_data 名称 —— 在 Docker 卷里做一致性备份，再复制一份到安装目录的 backups/（避免只留在卷里）
+backup_data() {
+  local name="$1"
+  dc run --rm --no-deps -T --entrypoint python web scripts/backup.py "/data/backups/$name" >/dev/null || return 1
+  mkdir -p "$DIR/backups"; chmod 700 "$DIR/backups"
+  dc cp "web:/data/backups/$name" "$DIR/backups/" || return 1
+}
+
+prune_update_backups() { # 只保留最近 5 份“更新前自动备份”（名字里带时间戳，按名字排序就是按时间排序）
+  local d old=() n
+  dc run --rm --no-deps -T --entrypoint sh web -c 'ls -d /data/backups/update-* 2>/dev/null | sort | head -n -5 | xargs -r rm -rf' || true
+  for d in "$DIR"/backups/update-*; do if [ -e "$d" ]; then old+=("$d"); fi; done
+  n="${#old[@]}"
+  if [ "$n" -gt 5 ]; then rm -rf -- "${old[@]:0:$((n - 5))}"; fi
+}
+
 # ---------- 命令 ----------
 
 cmd_install() {
   check_basics
   if [ -f "$DIR/.install" ]; then die "已经安装过了（$DIR）。更新请用 --update，卸载请用 --uninstall。"; fi
-  if [ "$SKIP_NGINX" != 1 ]; then check_port80; fi
+  if [ "$SKIP_NGINX" != 1 ]; then check_port 80; check_port 443; fi
   choose_domain
   choose_password
   install_packages
@@ -312,7 +418,7 @@ cmd_install() {
   show_address
   show_credentials
   printf '    登录后：「通知设置」添加 Bot，「签到账号」添加账号（粘贴 Cookie）。获取方法见 README。\n'
-  if [ "$SKIP_NGINX" != 1 ]; then printf '    云服务器还需要在厂商控制台的防火墙/安全组里放行 80%s 端口。\n' "$([ -n "$DOMAIN" ] && echo ' 和 443')"; fi
+  if [ "$SKIP_NGINX" != 1 ]; then printf '    云服务器还需要在厂商控制台的防火墙/安全组里放行 80 和 443 端口。\n'; fi
 }
 
 cmd_set_domain() {
@@ -331,19 +437,69 @@ cmd_set_domain() {
 
 current_version() { dc exec -T web python -c 'from nsapp import VERSION; print(VERSION)' 2>/dev/null || echo "未知"; }
 
+cmd_backup() {
+  check_basics; require_installed
+  local name
+  name="manual-$(date -u +%Y%m%d-%H%M%S)"
+  say "备份数据…"
+  backup_data "$name" || die "备份失败。"
+  say "备份完成：$DIR/backups/$name （数据库和加密密钥，请再复制一份到服务器之外保存）"
+}
+
 cmd_update() {
   check_basics; require_installed
-  say "当前版本：$(current_version)"
+  PORT="$(get_conf PORT)"; PORT="${PORT:-8090}"
+  local new old_img new_img name
+  new="$(mktemp)"
+  fetch_template "$new" || { rm -f "$new"; die "下载最新配置失败：$REPO_RAW/docker-compose.template.yml"; }
+  if cmp -s "$new" "$DIR/docker-compose.yml"; then
+    rm -f "$new"
+    say "已经是最新版本（$(current_version)），无需更新。"
+    return 0
+  fi
+  old_img="$(image_of "$DIR/docker-compose.yml")"; new_img="$(image_of "$new")"
+  say "当前版本：$(current_version)（$old_img）→ 更新为 $new_img"
+
   say "备份数据…"
-  local name
   name="update-$(date -u +%Y%m%d-%H%M%S)"
-  dc run --rm --no-deps -T --entrypoint python web scripts/backup.py "/data/backups/$name" >/dev/null
-  dc run --rm --no-deps -T --entrypoint sh web -c 'ls -dt /data/backups/update-* 2>/dev/null | tail -n +6 | xargs -r rm -rf' || true
-  say "下载最新镜像…"
-  dc pull
-  say "重启程序…"
-  dc up -d --wait --wait-timeout 180
-  say "已更新，当前版本：$(current_version)（更新前的数据备份在 Docker 卷的 /data/backups/$name，只保留最近 5 份）"
+  backup_data "$name" || { rm -f "$new"; die "备份失败，已取消更新。"; }
+  prune_update_backups
+
+  cp -p "$DIR/docker-compose.yml" "$DIR/.compose.before"
+  install -m 644 "$new" "$DIR/docker-compose.yml"; rm -f "$new"
+  say "下载新版本并重启…"
+  if pull_images && wait_ready; then
+    mv -f "$DIR/.compose.before" "$DIR/docker-compose.yml.prev"
+    say "已更新，当前版本：$(current_version)。更新前的数据备份在 $DIR/backups/$name"
+    return 0
+  fi
+
+  warn "更新失败，正在自动回滚到旧版本…"
+  mv -f "$DIR/.compose.before" "$DIR/docker-compose.yml"
+  if wait_ready; then
+    die "更新失败，已自动回滚到旧版本（$old_img），程序正常运行，数据没有改动。更新前的备份：$DIR/backups/$name"
+  fi
+  die "更新失败，回滚后程序仍没有就绪。看日志：cd $DIR && docker compose logs --tail 50 。更新前的备份：$DIR/backups/$name"
+}
+
+cmd_rollback() {
+  check_basics; require_installed
+  PORT="$(get_conf PORT)"; PORT="${PORT:-8090}"
+  [ -f "$DIR/docker-compose.yml.prev" ] || die "没有可以回滚的旧版本（成功更新过一次之后才会有）。"
+  local cur_img prev_img
+  cur_img="$(image_of "$DIR/docker-compose.yml")"; prev_img="$(image_of "$DIR/docker-compose.yml.prev")"
+  say "回滚程序版本：$cur_img → $prev_img （数据不动，不会恢复备份）"
+  cp -p "$DIR/docker-compose.yml" "$DIR/.compose.before"
+  install -m 644 "$DIR/docker-compose.yml.prev" "$DIR/docker-compose.yml"
+  if pull_images && wait_ready; then
+    mv -f "$DIR/.compose.before" "$DIR/docker-compose.yml.prev"
+    say "已回滚，当前版本：$(current_version)。再执行一次 --rollback 可回到 $cur_img。"
+    return 0
+  fi
+  warn "回滚失败，正在恢复原来的版本…"
+  mv -f "$DIR/.compose.before" "$DIR/docker-compose.yml"
+  wait_ready || true
+  die "回滚失败，已恢复到 $cur_img。"
 }
 
 cmd_set_password() {
@@ -359,7 +515,7 @@ cmd_uninstall() {
   check_basics
   if [ ! -f "$DIR/.install" ]; then die "没有找到安装（$DIR），无需卸载。"; fi
   have_tty || die "卸载需要在终端里手动确认。"
-  local domain nginx https target answer
+  local domain nginx https target answer images=() img
   domain="$(get_conf DOMAIN)"; nginx="$(get_conf NGINX)"; https="$(get_conf HTTPS)"
   target="${domain:-$DIR}"
   warn "将删除：程序、配置，以及全部数据（数据库、加密密钥、备份）。这个操作无法撤销。"
@@ -368,15 +524,18 @@ cmd_uninstall() {
   ask answer "再次输入「卸载」确认: "
   [ "$answer" = "卸载" ] || die "已取消。"
 
+  images=("$(image_of "$DIR/docker-compose.yml")" "$(image_of "$DIR/docker-compose.yml.prev")")
   say "停止并删除容器和数据卷…"
   dc down -v --remove-orphans
   if [ "$nginx" = 1 ]; then
     say "删除 nginx 配置和证书…"
-    rm -f "$NGINX_CONF"
+    rm -f "$NGINX_CONF" "$TLS_CRT" "$TLS_KEY"
     if [ "$https" = 1 ] && command -v certbot >/dev/null 2>&1; then certbot delete --cert-name "$domain" --non-interactive </dev/null || true; fi
     if nginx -t >/dev/null 2>&1; then systemctl reload nginx >/dev/null 2>&1 || true; fi
   fi
-  docker image rm "$IMAGE" >/dev/null 2>&1 || true
+  for img in "${images[@]}"; do
+    if [ -n "$img" ]; then docker image rm "$img" >/dev/null 2>&1 || true; fi
+  done
   rm -rf "$DIR"
   say "已卸载。Docker 和 nginx 本身没有删除（可能还有别的程序在用）。"
 }
@@ -385,6 +544,8 @@ main() {
   case "${1:-}" in
     ""|--install)   cmd_install ;;
     --update)       cmd_update ;;
+    --rollback)     cmd_rollback ;;
+    --backup)       cmd_backup ;;
     --set-password) cmd_set_password ;;
     --set-domain)   cmd_set_domain "${2:-}" ;;
     --uninstall)    cmd_uninstall ;;
