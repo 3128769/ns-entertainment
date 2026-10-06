@@ -5,4 +5,4 @@ cryptography==44.0.0
 bcrypt==4.2.1
 python-multipart==0.0.20
 SQLAlchemy==2.0.43
-alembic==1.16.5
+alembic==1.20.0
