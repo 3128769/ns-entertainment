@@ -79,6 +79,7 @@ git clone https://github.com/3128769/ns-entertainment.git
 ```
 
 > **解释**：`git clone` 是“把这个网址上的代码完整复制一份到本机”，会生成一个 `ns-entertainment` 文件夹。
+> **提示 `already exists and is not an empty directory`（已存在）不是错误**：说明你之前已经下载过了，直接做下一条 `cd` 就行，不要重复下载。想更新到最新版，进入文件夹后执行 `git pull`。
 
 ```bash
 cd ns-entertainment
@@ -98,7 +99,7 @@ mkdir -p data && chown -R 10001:10001 data && chmod 700 data
 > 2. `chown -R 10001:10001 data`：把文件夹的“主人”改成编号 10001（程序运行时用的身份），这样程序才有权限写入。
 > 3. `chmod 700 data`：只有主人能读写，别人看不到，保护密码和密钥。
 >
-> **成功**：没有任何输出，直接回到提示符（没消息就是好消息）。
+> **成功**：没有任何输出，直接回到提示符（没消息就是好消息）。重复执行也没有影响。
 
 ### 5. 构建程序
 
