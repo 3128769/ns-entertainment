@@ -1,6 +1,6 @@
 # 部署、升级与回滚
 
-镜像由 `Dockerfile` 多阶段构建：Node 只用于构建前端，运行时只有 Python。到 Docker Hub 拉取基础镜像很慢时，可以用主机上已有的镜像：`--build-arg NODE_IMAGE=... --build-arg PYTHON_IMAGE=...`（经典构建器 `DOCKER_BUILDKIT=0` 会直接使用本地镜像）。`docker compose` 启动 `web` 与 `worker` 两个服务；反向代理（见 `deploy/nginx.conf`）只指向 `127.0.0.1:8090`。API 只监听本机回环地址，登录限速使用 nginx 写入的 `X-Real-IP`。
+镜像由 `Dockerfile` 多阶段构建：Node 只用于构建前端，运行时只有 Python。打版本标签（`v*`）时，GitHub Actions（`.github/workflows/release.yml`）会构建 `runtime` 阶段并发布到 `ghcr.io/3128769/ns-entertainment:<版本>`，同时支持 amd64 和 arm64；`docker-compose.yml` 直接使用这个镜像，也可以用 `docker compose build` 在本地构建同一个阶段。本地构建时，到 Docker Hub 拉取基础镜像很慢的话，可以用主机上已有的镜像：`--build-arg NODE_IMAGE=... --build-arg PYTHON_IMAGE=...`（经典构建器 `DOCKER_BUILDKIT=0` 会直接使用本地镜像）。`docker compose` 启动 `web` 与 `worker` 两个服务；反向代理（见 `deploy/nginx.conf`）只指向 `127.0.0.1:8090`。API 只监听本机回环地址，登录限速使用 nginx 写入的 `X-Real-IP`。
 
 ## 新安装
 
@@ -8,7 +8,7 @@
 
 ```bash
 mkdir -p data && sudo chown -R 10001:10001 data && chmod 700 data
-docker compose build
+docker compose pull   # 下载预构建镜像；连不上 ghcr.io 时改用 docker compose build
 docker compose run --rm --no-deps web python -m nsapp.cli migrate   # 建表并生成实例密钥
 docker compose run --rm --no-deps web python -m nsapp.cli set-admin-password   # 自己设置管理员密码（可选）
 docker compose up -d
@@ -77,10 +77,10 @@ docker compose up -d --no-build
 
 ```bash
 git pull
-docker compose build && docker compose run --rm --no-deps web python -m nsapp.cli migrate && docker compose up -d
+docker compose pull && docker compose run --rm --no-deps web python -m nsapp.cli migrate && docker compose up -d
 ```
 
-先拉取最新代码，再重新构建、升级数据库（没有变化就什么也不做）、用新版本重新启动。数据和密码都不会丢。
+先拉取最新代码（`docker-compose.yml` 里会指向新版本的镜像），再下载新版镜像、升级数据库（没有变化就什么也不做）、用新版本重新启动。数据和密码都不会丢。
 
 **手动备份**：
 
@@ -119,7 +119,7 @@ README 的第 9–14 步是完整的公网部署流程（域名或 `sslip.io`、
 | `git: command not found` / `docker: command not found` | 没装 git 或 Docker，回到 README 的第 2 步 |
 | `permission denied` | 你不是 root 用户，命令前面加 `sudo ` |
 | `No such file or directory` | 不在程序文件夹里（先 `cd ~/ns-entertainment`），或者把本该在服务器上输入的命令输到了自己电脑上 |
-| `docker compose build` 很久不动 | 第一次要下载东西，网络慢时可能十几分钟，不要关窗口 |
+| `docker compose pull` 报错或很慢 | 服务器连不上 `ghcr.io`：换成 `docker compose build` 在本地构建（要访问 Docker Hub、npm、PyPI，第一次可能十几分钟，不要关窗口） |
 | 浏览器打不开 `https://你的域名` | 依次检查：`getent hosts 你的域名` 是否指向服务器 IP；厂商控制台是否放行 TCP 80/443；`docker compose ps` 程序是否在运行；`nginx -t` 和 `systemctl status nginx` |
 | `certbot` 申请证书失败 | 网址没有解析到本机，或 80 端口没放行（Let's Encrypt 要从外网访问 80 端口） |
 | nginx 启动失败，提示 80 端口被占用 | 服务器上已有别的程序占用了 80，先 `ss -ltnp \| grep ':80 '` 看是谁 |

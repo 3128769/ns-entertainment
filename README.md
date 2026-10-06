@@ -21,10 +21,10 @@ NodeSeek 管理程序：**每日自动签到**、**关键词监听**（新帖标
 
 | 项目 | 要求 |
 | --- | --- |
-| 服务器系统 | Linux（Debian / Ubuntu / CentOS / Rocky 等），教程以 Debian / Ubuntu 为例 |
+| 服务器系统 | Linux（Debian / Ubuntu / CentOS / Rocky 等），教程以 Debian / Ubuntu 为例。CPU 架构 **x86_64 和 ARM64 都支持** |
 | 配置 | 1 核 CPU、**1GB 以上内存**、**5GB 以上空闲磁盘** |
 | 需要安装的软件 | **git**、**Docker**（含 Docker Compose v2）、**nginx**、**certbot**。教程第 2、11 步会装。**不需要**自己装 Python 或 Node，它们都在 Docker 里 |
-| 网络 | 服务器能访问外网：GitHub、Docker Hub（下载基础镜像）、npm 和 PyPI（构建时下载依赖）、Let's Encrypt（申请 HTTPS 证书）、`www.nodeseek.com`、`rss.nodeseek.com`、`api.telegram.org`。直连 NodeSeek 被拦截时，可以在程序里给账号配置代理 |
+| 网络 | 服务器能访问外网：GitHub（下载代码）、`ghcr.io`（下载做好的程序镜像）、Let's Encrypt（申请 HTTPS 证书）、`www.nodeseek.com`、`rss.nodeseek.com`、`api.telegram.org`。直连 NodeSeek 被拦截时，可以在程序里给账号配置代理。程序镜像由 GitHub 自动构建好，**你的服务器上不需要构建**（只有选择自己构建时才需要 Docker Hub、npm、PyPI） |
 | 端口 | 对公网放行 **80** 和 **443**（nginx 和 HTTPS 用，教程第 10 步）。程序自己的 `8090` 只在服务器内部使用，**不要**对公网放行 |
 | 网址 | 一个指向服务器 IP 的**域名**。**没有域名也行**：用免费的 `sslip.io`，教程第 9 步教你 |
 | 你要准备的资料 | 服务器的 **IP 地址**和 **root 密码**；一个**邮箱**（申请证书用）；NodeSeek 账号的 **Cookie**（教程第 15 步教你怎么拿）；想收通知的话，再准备一个 **Telegram 机器人**（Token 和 Chat ID，同样在第 15 步） |
@@ -84,7 +84,7 @@ git clone https://github.com/3128769/ns-entertainment.git
 ```
 
 > **解释**：`git clone` 是“把这个网址上的代码完整复制一份到本机”，会生成一个 `ns-entertainment` 文件夹。
-> **提示 `already exists and is not an empty directory`（已存在）不是错误**：说明你之前已经下载过了，直接做下一条 `cd` 就行，不要重复下载。想更新到最新版，进入文件夹后执行 `git pull`。
+> **提示 `already exists and is not an empty directory`（已存在）不是错误**：说明你之前已经下载过了，直接做下一条 `cd` 就行，不要重复下载。想更新到最新版，见 [docs/deployment.md](docs/deployment.md) 的“日常维护”。
 
 ```bash
 cd ns-entertainment
@@ -106,14 +106,15 @@ mkdir -p data && chown -R 10001:10001 data && chmod 700 data
 >
 > **成功**：没有任何输出，直接回到提示符（没消息就是好消息）。重复执行也没有影响。
 
-### 5. 构建程序
+### 5. 下载程序镜像
 
 ```bash
-docker compose build
+docker compose pull
 ```
 
-> **解释**：按仓库里的“配方”下载所需的东西，做出程序的“安装包”（镜像）。**第一次要几分钟，屏幕可能很久不动，是正常的，请不要关窗口。**
-> **成功**：最后出现 `Built` 字样，回到提示符。
+> **解释**：从 GitHub 的镜像仓库（`ghcr.io`）下载**已经做好的程序**（镜像，相当于“安装包”）。`pull` 是“下载”。一般一分钟左右，不用自己构建，也不用装 Python 和 Node。
+> **成功**：显示 `Pulled`，回到提示符。
+> **下载失败**（比如服务器连不上 `ghcr.io`）：改成自己构建，执行 `docker compose build`，第一次要几分钟，屏幕很久不动是正常的，不要关窗口。
 
 ### 6. 初始化数据库
 
