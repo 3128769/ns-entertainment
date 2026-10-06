@@ -49,7 +49,7 @@ docker compose up -d --no-build
 
 `scripts/backup.py <目录>` 用 SQLite 在线备份 API 生成一致性副本，并复制 `.secret_key` 与 `.admin_password`（权限 600）。**数据库和密钥必须一起保存**，没有密钥无法解密 Cookie 和 Token。`scripts/restore.py <备份目录>` 先校验完整性，再把被替换的文件挪到 `backups/restore-displaced-*`。
 
-用 `docker-compose.template.yml` 安装时，数据在 Docker 卷 `ns-data` 里（不是 `./data` 目录）。备份：
+用 `install.sh` 或 `docker-compose.template.yml` 安装时，数据在 Docker 卷 `ns-data` 里（不是 `./data` 目录）。脚本安装的程序在 `/opt/ns-entertainment`，下面的命令都在这个目录里执行；`install.sh --update` 会在更新前自动备份到卷里的 `/data/backups/update-*`（只保留最近 5 份）。手动备份：
 
 ```bash
 docker compose stop worker web

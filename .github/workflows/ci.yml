@@ -42,3 +42,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --target test -t ns-entertainment:test . && docker run --rm --network none ns-entertainment:test
+
+  script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck install.sh
+      - name: README compose block matches docker-compose.template.yml
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          readme = open("README.md", encoding="utf-8").read()
+          template = open("docker-compose.template.yml", encoding="utf-8").read().rstrip("\n")
+          block = re.search(r"```yaml\n(.*?)\n```", readme, re.S)
+          sys.exit(0 if block and block.group(1) == template else "README.md 里的 compose 内容和 docker-compose.template.yml 不一致")
+          PY
