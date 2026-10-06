@@ -23,8 +23,8 @@ curl --fail http://127.0.0.1:8090/readyz
 
 1. **构建并测试候选镜像**（不影响线上）：
    ```bash
-   docker build -t ns-entertainment:3.0.2 .
-   docker build --target test -t ns-entertainment:3.0.2-test . && docker run --rm --network none ns-entertainment:3.0.2-test
+   docker build --target runtime -t ns-entertainment:3.0.3 .
+   docker build --target test -t ns-entertainment:3.0.3-test . && docker run --rm --network none ns-entertainment:3.0.3-test
    ```
 2. **用生产数据的副本演练**：用 SQLite 在线备份复制 `app.sqlite` 和 `.secret_key` 到临时目录，`NS_SCHEDULER_ENABLED=0`，只读检查接口返回与数据库一致。
 3. **停写、备份**：

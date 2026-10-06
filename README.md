@@ -122,7 +122,7 @@ docker compose run --rm --no-deps web python -m nsapp.cli migrate
 ```
 
 > **解释**：临时运行程序里的“初始化工具”，建好数据库，并生成**加密密钥**（用来保护你的 Cookie 和 Token）。`--rm` 表示用完就丢掉这个临时容器。
-> **成功**：显示 `{"status": "ok", "version": "3.0.2"}`。
+> **成功**：显示 `{"status": "ok", "version": "3.0.3"}`。
 
 ### 7. 设置管理员密码（登录网页用的）
 

@@ -48,7 +48,7 @@ async function submit(): Promise<void> {
         <Loader2 v-if="busy" :size="16" class="spin" aria-hidden="true" />
         {{ busy ? '登录中…' : '登录' }}
       </button>
-      <div class="version">NodeSeek 娱乐中心 · v3.0.2</div>
+      <div class="version">NodeSeek 娱乐中心 · v3.0.3</div>
     </form>
   </main>
 </template>

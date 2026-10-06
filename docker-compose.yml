@@ -1,7 +1,9 @@
 # One image, two roles. `web` serves the API and the UI; `worker` is the only scheduler.
 x-common: &common
-  build: .
-  image: ns-entertainment:3.0.2
+  build:
+    context: .
+    target: runtime
+  image: ghcr.io/3128769/ns-entertainment:3.0.3
   volumes:
     - ./data:/data
   environment: &env
