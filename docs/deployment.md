@@ -108,46 +108,9 @@ docker compose up -d
 
 调度固定使用北京时间（Asia/Shanghai），界面上的时间也都是北京时间。
 
-## 用域名访问（HTTPS）
+## 域名与 HTTPS
 
-不想每次都开 SSH 隧道，可以用域名访问。先把域名的 A 记录解析到服务器 IP，并放行 80 和 443 端口，然后在服务器上依次执行：
-
-```bash
-apt-get install -y nginx certbot python3-certbot-nginx
-```
-
-安装 nginx（把外面的访问转给程序）和 certbot（免费申请 HTTPS 证书）。
-
-下面整段一起复制（把 `你的域名` 换成真实域名）：
-
-```bash
-cat > /etc/nginx/conf.d/ns.conf <<'EOF'
-server {
-    listen 80;
-    server_name 你的域名;
-    client_max_body_size 25m;
-
-    location / {
-        proxy_pass http://127.0.0.1:8090;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 180s;
-    }
-}
-EOF
-```
-
-```bash
-nginx -t && systemctl reload nginx
-certbot --nginx -d 你的域名
-```
-
-先检查 nginx 配置，再让它重新加载；然后 certbot 自动申请证书（按提示填邮箱、同意条款，问是否跳转到 HTTPS 选“跳转”，证书会自动续期）。完成后用 `https://你的域名` 访问。
-
-`X-Real-IP` 那行不能删：程序靠它给“输错密码”限速。`deploy/nginx.conf` 是证书申请完成之后的完整模板（含安全响应头），可以对照参考。
+README 的第 9–14 步是完整的公网部署流程（域名或 `sslip.io`、放行 80/443、nginx 转发、certbot 申请证书）。程序只监听 `127.0.0.1:8090`，对外一律经过 nginx；登录限速依赖 nginx 写入的 `X-Real-IP`，配置里这一行不能删。证书申请完成后，`deploy/nginx.conf` 是带安全响应头的完整模板，可以对照使用。
 
 ## 常见问题
 
@@ -157,6 +120,9 @@ certbot --nginx -d 你的域名
 | `permission denied` | 你不是 root 用户，命令前面加 `sudo ` |
 | `No such file or directory` | 不在程序文件夹里（先 `cd ~/ns-entertainment`），或者把本该在服务器上输入的命令输到了自己电脑上 |
 | `docker compose build` 很久不动 | 第一次要下载东西，网络慢时可能十几分钟，不要关窗口 |
+| 浏览器打不开 `https://你的域名` | 依次检查：`getent hosts 你的域名` 是否指向服务器 IP；厂商控制台是否放行 TCP 80/443；`docker compose ps` 程序是否在运行；`nginx -t` 和 `systemctl status nginx` |
+| `certbot` 申请证书失败 | 网址没有解析到本机，或 80 端口没放行（Let's Encrypt 要从外网访问 80 端口） |
+| nginx 启动失败，提示 80 端口被占用 | 服务器上已有别的程序占用了 80，先 `ss -ltnp \| grep ':80 '` 看是谁 |
 | 登录提示“用户名或密码错误” | 用户名是 `admin`；密码区分大小写；`cat data/.admin_password` 的输出里 `root@` 开头的是提示符，不属于密码；忘了就重新设置 |
 | 提示“尝试次数过多” | 输错太多次，等 5 分钟再试 |
 | 页面显示“后台服务未运行” | `docker compose ps` 看状态，再看 worker 日志 |

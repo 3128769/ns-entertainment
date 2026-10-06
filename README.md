@@ -21,21 +21,24 @@
 | --- | --- |
 | 服务器系统 | Linux（Debian / Ubuntu / CentOS / Rocky 等），教程以 Debian / Ubuntu 为例 |
 | 配置 | 1 核 CPU、**1GB 以上内存**、**5GB 以上空闲磁盘** |
-| 需要安装的软件 | **git** 和 **Docker**（含 Docker Compose v2）。教程第 2 步会装。**不需要**自己装 Python 或 Node，它们都在 Docker 里 |
-| 网络 | 服务器能访问外网：GitHub、Docker Hub（下载基础镜像）、npm 和 PyPI（构建时下载依赖）、`www.nodeseek.com`、`rss.nodeseek.com`、`api.telegram.org`。直连 NodeSeek 被拦截时，可以在程序里给账号配置代理 |
-| 端口 | 程序用 `8090`，**只对服务器本机开放**（不对公网），所以不需要放行 |
-| 你要准备的资料 | 服务器的 **IP 地址**和 **root 密码**；NodeSeek 账号的 **Cookie**（教程第 10 步教你怎么拿）；想收通知的话，再准备一个 **Telegram 机器人**（Token 和 Chat ID，同样在第 10 步） |
+| 需要安装的软件 | **git**、**Docker**（含 Docker Compose v2）、**nginx**、**certbot**。教程第 2、11 步会装。**不需要**自己装 Python 或 Node，它们都在 Docker 里 |
+| 网络 | 服务器能访问外网：GitHub、Docker Hub（下载基础镜像）、npm 和 PyPI（构建时下载依赖）、Let's Encrypt（申请 HTTPS 证书）、`www.nodeseek.com`、`rss.nodeseek.com`、`api.telegram.org`。直连 NodeSeek 被拦截时，可以在程序里给账号配置代理 |
+| 端口 | 对公网放行 **80** 和 **443**（nginx 和 HTTPS 用，教程第 10 步）。程序自己的 `8090` 只在服务器内部使用，**不要**对公网放行 |
+| 网址 | 一个指向服务器 IP 的**域名**。**没有域名也行**：用免费的 `sslip.io`，教程第 9 步教你 |
+| 你要准备的资料 | 服务器的 **IP 地址**和 **root 密码**；一个**邮箱**（申请证书用）；NodeSeek 账号的 **Cookie**（教程第 15 步教你怎么拿）；想收通知的话，再准备一个 **Telegram 机器人**（Token 和 Chat ID，同样在第 15 步） |
 
 ---
 
 ## 安装教程（每一条命令的解释）
+
+本教程把程序部署在**公网服务器**上：装完后，在任何设备的浏览器里打开 `https://你的网址` 就能登录使用，**不需要再开任何额外的终端**。
 
 ### 使用说明
 
 - **灰色框里才是命令**：复制，粘贴到终端，按**回车**。
 - **一次只输入一条**，等屏幕最后一行又出现 `root@xxx:~#`（说明上一条做完了），再输入下一条。
 - 输入密码时**屏幕不显示任何字符**，这是正常的，输完直接回车。
-- 不是 root 用户的话，每条命令前面加 `sudo `。
+- 不是 root 用户的话，登录后先执行 `sudo -i` 切换成 root，再往下做。
 
 ### 1. 登录服务器
 
@@ -129,7 +132,7 @@ docker compose run --rm --no-deps web python -m nsapp.cli set-admin-password
 
 > **解释**：运行程序里的“设置密码工具”。屏幕会问两次，**输入时不显示任何字符**：先显示 `新密码（至少 8 位）:`，输入后回车；再显示 `再输入一次:`，再输入一遍回车。
 > **成功**：显示 `{"username": "admin", "created": true, ...}`。显示“两次输入不一致，未修改”就重新执行一遍。
-> **记住这个密码**：第 9 步登录要用。以后**忘记密码，也是执行这一条重新设置**。
+> **记住这个密码**：第 14 步登录要用。以后**忘记密码，也是执行这一条重新设置**。
 
 ### 8. 启动
 
@@ -144,22 +147,102 @@ docker compose up -d
 curl http://127.0.0.1:8090/readyz
 ```
 
-> **解释**：`curl` 是“访问一个网址”。`127.0.0.1` 指“服务器自己”，`8090` 是程序的端口，`readyz` 是“你准备好了吗”。
+> **解释**：在服务器内部自检一下程序有没有跑起来。`curl` 是“访问一个网址”，`127.0.0.1` 指“服务器自己”，`8090` 是程序的端口，`readyz` 是“你准备好了吗”。**这一步只是自检，不是最终的访问方式。**
 > **成功**：显示 `{"status":"ok","ready":true}`。显示 `503` 或连不上，等 10 秒再试一次。
 
-### 9. 打开页面
+### 9. 确定访问网址
 
-程序为了安全只开在服务器内部，不能直接用服务器 IP 访问。在**你自己电脑**上**新开一个**终端窗口（不是服务器那个），输入：
+程序要通过一个网址访问，**二选一**：
+
+- **有域名**：到你的域名服务商那里，在“解析 / DNS”里添加一条 **A 记录**：主机记录填 `ns`，记录值填**服务器 IP**。你的网址就是 `ns.你的域名`（比如 `ns.example.com`）。
+- **没有域名**：用免费的 `sslip.io`，不用注册、不用设置。规则：**把服务器 IP 里的点换成短横线，前面加 `ns.`，后面加 `.sslip.io`**。比如服务器 IP 是 `203.0.113.10`，网址就是 `ns.203-0-113-10.sslip.io`。
+
+**后面所有的 `你的域名`，都换成你这里确定的网址。**
 
 ```bash
-ssh -L 8090:127.0.0.1:8090 root@服务器IP
+getent hosts 你的域名
 ```
 
-> **解释**：登录服务器（和第 1 步一样），同时用 `-L` 在你的电脑和服务器之间搭一条**加密通道**，把“你电脑的 8090 端口”接到“服务器内部的 8090 端口”。输入服务器密码。**这个窗口要一直开着，关了就打不开页面。**
+> **解释**：查这个网址指向哪个 IP。
+> **成功**：显示的 IP 就是你的服务器 IP。没有显示，或者 IP 不对：有域名的话说明解析还没生效，等几分钟再试，**不要继续往下做**。
 
-然后在你电脑的浏览器地址栏输入 `http://127.0.0.1:8090` 回车，看到登录页，用户名 `admin`，密码是第 7 步设置的那个。
+### 10. 放行端口 80 和 443
 
-### 10. 登录之后：添加账号
+申请 HTTPS 证书、浏览器访问，都要从外网连到服务器的 **80** 和 **443** 端口。
+
+1. 到你买服务器的**厂商网页控制台**，找到“防火墙 / 安全组”，添加规则：放行 **TCP 80** 和 **TCP 443**。**这一步是在网页上点，不是命令。** 程序的 `8090` 端口**不要**放行。
+2. 然后看看服务器自带的防火墙有没有开：
+
+```bash
+ufw status
+```
+
+> **解释**：查看服务器自带防火墙 `ufw` 的状态。显示 `Status: inactive` 或 `command not found`，说明没开，**直接做第 11 步**。只有显示 `Status: active` 才需要执行下面这一条：
+
+```bash
+ufw allow 80,443/tcp
+```
+
+> **解释**：在 `ufw` 里放行 80 和 443 端口。
+
+### 11. 安装 nginx 和 certbot
+
+```bash
+apt-get install -y nginx certbot python3-certbot-nginx
+```
+
+> **解释**：`nginx` 是“前台接待”，接住从外网来的访问，转交给里面的程序（8090）；`certbot` 是免费申请 HTTPS 证书的工具；`python3-certbot-nginx` 是让 certbot 能自动修改 nginx 配置的插件。
+> **成功**：回到提示符，没有红色报错。
+
+### 12. 配置 nginx：把访问转给程序
+
+**先把下面 `server_name` 那一行的 `你的域名` 换成第 9 步的网址（整段只改这一处）**，再整段一起复制、粘贴、回车：
+
+```bash
+cat > /etc/nginx/conf.d/ns.conf <<'EOF'
+server {
+    listen 80;
+    server_name 你的域名;
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 180s;
+    }
+}
+EOF
+```
+
+> **解释**：`cat > 文件 <<'EOF' … EOF` 是“把中间这一段文字写进 `/etc/nginx/conf.d/ns.conf` 这个文件”。文字的意思是：`listen 80` 监听 80 端口；`server_name` 有人访问这个网址时生效；`proxy_pass` 把访问转交给内部的 8090 端口。`X-Real-IP` 那一行**不能删**，程序靠它认出访问者，给“输错密码”限速。
+> **成功**：没有任何输出，直接回到提示符。
+
+```bash
+nginx -t && systemctl reload nginx
+```
+
+> **解释**：`nginx -t` 先检查配置有没有写错；没错才（`&&`）执行 `systemctl reload nginx`，让 nginx 重新加载配置。
+> **成功**：先显示 `syntax is ok` 和 `test is successful`，再回到提示符。
+
+### 13. 申请 HTTPS 证书
+
+```bash
+certbot --nginx -d 你的域名 -m 你的邮箱 --agree-tos --no-eff-email --redirect
+```
+
+> **解释**：自动向 Let's Encrypt 申请**免费**的 HTTPS 证书，并写进 nginx 配置。`-d` 是你的网址；`-m` 是你的邮箱（证书快到期时提醒你）；`--agree-tos` 表示你同意 Let's Encrypt 的服务条款；`--no-eff-email` 表示不订阅推广邮件；`--redirect` 表示别人用 `http://` 访问时自动跳到 `https://`。证书**会自动续期**，不用管。
+> **成功**：出现 `Congratulations!`。
+> **失败**：多半是网址没指向这台服务器（回第 9 步）或者 80 端口没放行（回第 10 步）。
+
+### 14. 打开页面
+
+在**任何设备**的浏览器地址栏输入 `https://你的域名` 回车，看到登录页：用户名 `admin`，密码是第 7 步设置的那个。
+
+### 15. 登录之后：添加账号
 
 这一步在网页上点，不用命令：
 
