@@ -1,0 +1,85 @@
+# NodeSeek 娱乐中心 · 通用 docker-compose.yml
+#
+# 用法（在服务器上）：
+#   1. 新建一个文件夹，把本文件保存成 docker-compose.yml
+#   2. 在同一个文件夹里新建 .env，写一行管理员密码（至少 8 位，不要含 $）：
+#        NS_ADMIN_PASSWORD=你的密码
+#      想改本机端口，可以再加一行：NS_PORT=8090
+#   3. 启动：docker compose up -d
+#
+# 管理员用户名是 admin。程序只监听服务器本机的 127.0.0.1:8090，不对公网开放：
+# 用 nginx 做 HTTPS 反向代理（模板见 deploy/nginx.conf），或者用 SSH 隧道访问。
+# 更新：docker compose pull && docker compose up -d
+# 数据（数据库和加密密钥）保存在 Docker 卷 ns-data 里，备份时必须一起保存。
+
+x-ns: &ns
+  image: ghcr.io/3128769/ns-entertainment:latest   # 想固定版本就改成具体版本号，例如 :3.0.3
+  restart: unless-stopped
+  volumes:
+    - ns-data:/data
+  environment: &env
+    TZ: Asia/Shanghai          # 调度和界面显示固定使用北京时间，不用改
+    NS_DATA_DIR: /data         # 数据目录：SQLite 数据库、加密密钥、管理员密码文件
+    NS_ADMIN_USER: admin       # 管理员用户名，只在第一次创建时使用
+    # 管理员初始密码（来自 .env），只在第一次创建管理员时生效；留空则随机生成，写入 /data/.admin_password
+    NS_ADMIN_PASSWORD: "${NS_ADMIN_PASSWORD:-}"
+    NS_JOB_CONCURRENCY: "4"    # 后台任务并发数，1–16
+    # 加密 Cookie、代理凭据、Bot Token 的实例密钥。默认自动生成并保存在数据卷里（/data/.secret_key），
+    # 一般不用设置；必须和数据库一起备份，丢失后这些内容无法解密
+    # NS_SECRET_KEY: ""
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  init: true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+  mem_limit: 1g
+  cpus: 1.0
+
+services:
+  # 一次性任务：建表并生成加密密钥。每次启动都会先跑一遍，重复执行没有副作用
+  migrate:
+    <<: *ns
+    command: ["python", "-m", "nsapp.cli", "migrate"]
+    restart: "no"
+
+  # 网页和接口
+  web:
+    <<: *ns
+    command: ["uvicorn", "nsapp.api.app:app", "--host", "0.0.0.0", "--port", "8090"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${NS_PORT:-8090}:8090"
+    environment:
+      <<: *env
+      NS_SCHEDULER_ENABLED: "0"   # web 必须是 0：整个系统只能有一个 worker 负责调度
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # 后台任务：签到、关键词监听、私信通知（整个系统只能有一个）
+  worker:
+    <<: *ns
+    command: ["python", "-m", "nsapp.worker.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *env
+      NS_SCHEDULER_ENABLED: "1"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from nsapp.repositories.jobs import state; raise SystemExit(0 if state()['ready'] else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  ns-data:
